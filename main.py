@@ -1,4 +1,16 @@
+import os
+
 import requests
+from dotenv import load_dotenv
+from openai import OpenAI
+
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com",
+)
 
 
 def get_location(city):
@@ -32,6 +44,7 @@ def get_location(city):
 
 def get_weather(city):
     """查询指定城市未来天气"""
+    
 
     location = get_location(city)
 
@@ -60,7 +73,25 @@ def get_weather(city):
         "daily": data["daily"]
     }
 
+def ask_llm(question):
+    """向 DeepSeek 提问"""
+
+    response = client.chat.completions.create(
+        model="deepseek-flash",
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个简洁、友好的中文助手。"
+            },
+            {
+                "role": "user",
+                "content": question
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
 
 if __name__ == "__main__":
-    weather = get_weather("北京")
-    print(weather)
+    answer = ask_llm("你好，请用一句话介绍你自己。")
+    print(answer)
