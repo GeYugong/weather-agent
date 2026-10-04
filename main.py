@@ -1,6 +1,8 @@
 import os
-
+import json
 import requests
+
+from datetime import date
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -12,6 +14,25 @@ client = OpenAI(
     base_url="https://api.deepseek.com",
 )
 
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "查询某个城市未来几天的天气。当用户询问天气、温度、是否带伞、穿什么等依赖天气的问题时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "城市名称，例如北京、上海、大连"
+                    }
+                },
+                "required": ["city"]
+            }
+        }
+    }
+]
 
 def get_location(city):
     """把城市名称转换成经纬度"""
@@ -73,6 +94,77 @@ def get_weather(city):
         "daily": data["daily"]
     }
 
+def run_agent(question):
+    """最基本的 Agent 执行循环"""
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"你是一个天气助手。今天是 {date.today().isoformat()}。"
+                "如果用户的问题需要实时或预报天气信息，调用 get_weather 工具。"
+                "如果不需要天气信息，直接回答。"
+                "拿到天气数据后，用自然、简洁的中文回答用户。"
+            )
+        },
+        {
+            "role": "user",
+            "content": question
+        }
+    ]
+
+    # 最多执行 3 轮，防止无限循环
+    for _ in range(3):
+
+        response = client.chat.completions.create(
+            model="deepseek-flash",
+            messages=messages,
+            tools=tools,
+            extra_body={
+                "thinking": {
+                    "type": "disabled"
+                }
+            }
+        )
+
+        message = response.choices[0].message
+
+        # 把模型的回复加入聊天历史
+        messages.append(message)
+
+        # 没有调用工具，说明模型已经有最终答案
+        if not message.tool_calls:
+            return message.content
+
+        # 模型要求调用工具
+        for tool_call in message.tool_calls:
+
+            if tool_call.function.name == "get_weather":
+
+                arguments = json.loads(
+                    tool_call.function.arguments
+                )
+
+                city = arguments["city"]
+
+                print(f"[Agent] 正在查询 {city} 的天气...")
+
+                weather_result = get_weather(city)
+
+                # 把工具执行结果交还给模型
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(
+                            weather_result,
+                            ensure_ascii=False
+                        )
+                    }
+                )
+
+    return "Agent 执行次数过多，请重新提问。"
+
 def ask_llm(question):
     """向 DeepSeek 提问"""
 
@@ -93,5 +185,21 @@ def ask_llm(question):
     return response.choices[0].message.content
 
 if __name__ == "__main__":
-    answer = ask_llm("你好，请用一句话介绍你自己。")
-    print(answer)
+
+    print("Weather Agent 已启动")
+    print("输入 exit 可以退出")
+
+    while True:
+
+        question = input("\n你：").strip()
+
+        if question.lower() in {"exit", "quit", "退出"}:
+            print("再见！")
+            break
+
+        try:
+            answer = run_agent(question)
+            print(f"Agent：{answer}")
+
+        except Exception as e:
+            print(f"发生错误：{e}")
