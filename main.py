@@ -94,26 +94,21 @@ def get_weather(city):
         "daily": data["daily"]
     }
 
-def run_agent(question):
+def run_agent(question, history):
+    messages = [
+    {
+        "role": "system",
+        "content": (
+            f"你是一个天气助手。今天是 {date.today().isoformat()}。"
+            "结合之前的对话理解用户的省略和指代。"
+            "需要天气信息时调用 get_weather 工具。"
+        )
+    }
+] + history + [
+    {"role": "user", "content": question}
+]
     """最基本的 Agent 执行循环"""
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"你是一个天气助手。今天是 {date.today().isoformat()}。"
-                "如果用户的问题需要实时或预报天气信息，调用 get_weather 工具。"
-                "如果不需要天气信息，直接回答。"
-                "拿到天气数据后，用自然、简洁的中文回答用户。"
-            )
-        },
-        {
-            "role": "user",
-            "content": question
-        }
-    ]
-
-    # 最多执行 3 轮，防止无限循环
     for _ in range(3):
 
         response = client.chat.completions.create(
@@ -134,7 +129,11 @@ def run_agent(question):
 
         # 没有调用工具，说明模型已经有最终答案
         if not message.tool_calls:
+            history.append({"role": "user", "content": question})
+            history.append({"role": "assistant", "content": message.content})
+            history[:] = history[-10:]
             return message.content
+        
 
         # 模型要求调用工具
         for tool_call in message.tool_calls:
@@ -186,6 +185,8 @@ def ask_llm(question):
 
 if __name__ == "__main__":
 
+    history = []
+
     print("Weather Agent 已启动")
     print("输入 exit 可以退出")
 
@@ -198,7 +199,7 @@ if __name__ == "__main__":
             break
 
         try:
-            answer = run_agent(question)
+            answer = run_agent(question, history)
             print(f"Agent：{answer}")
 
         except Exception as e:
